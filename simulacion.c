@@ -76,65 +76,53 @@ int main(int argc , char** argv) {
         	comando[strcspn(comando, "\n")] = '\0';
                 //printf("Comando escrito: %s\n", comando);
     	} while (ComprobarComando(comando, orden, argumento1, argumento2) == 0);
+        if (strcmp(orden, "dir") == 0) {
+            Directorio(directorio, &ext_blq_inodos);
+            continue;
+        }
 
+        if (strcmp(orden, "bytemaps") == 0) {
+            printf("El comando es bytemaps");
+            Printbytemaps(&ext_bytemaps);
+            continue;
+        }
 
-    if (strcmp(orden, "dir") == 0) {
-        Directorio(directorio, &ext_blq_inodos);
-        continue;
-    }
+        if (strcmp(orden, "copy") == 0) {
+            Copiar(directorio, &ext_blq_inodos, &ext_bytemaps, &ext_superblock, memdatos, argumento1, argumento2, fent);
+            continue;
+        }
+        
+        if (strcmp(orden, "info") == 0) {
+            LeeSuperBloque(&ext_superblock);
+            continue;
+        } 
+    
 
-    if (strcmp(orden, "bytemaps") == 0) {
-        printf("El comando es bytemaps");
-         Printbytemaps(&ext_bytemaps);
-	 continue;
-   }
+        if (strcmp(orden, "rename") == 0) {
+            Renombrar(directorio, &ext_blq_inodos, argumento1, argumento2);
+            continue;
+        }
 
-    if (strcmp(orden, "copy") == 0) {
-          Copiar(directorio, &ext_blq_inodos, &ext_bytemaps, &ext_superblock, memdatos, argumento1, argumento2, fent);
-       continue;
-    }
-	
-    if (strcmp(orden, "info") == 0) {
-        LeeSuperBloque(&ext_superblock);
-        continue;
-     } 
- 
-
-    if (strcmp(orden, "rename") == 0) {
-        Renombrar(directorio, &ext_blq_inodos, argumento1, argumento2);
-       continue;
-    }
-
-    if (strcmp(orden, "remove") == 0) {
-        Borrar(directorio, &ext_blq_inodos, &ext_bytemaps, &ext_superblock, argumento1, fent);
-        continue;
-    }
-    /*
-	  // Escritura de metadatos en comandos rename, remove, copy     
-    Grabarinodosydirectorio(&directorio, &ext_blq_inodos, fent);
-    GrabarByteMaps(&ext_bytemaps, fent);
-    GrabarSuperBloque(&ext_superblock, fent);
-
-         if (grabardatos)
-                 GrabarDatos(memdatos, fent);
-         grabardatos = 0;
-
-	*/	
-
-	if (strcmp(orden, "imprimir") == 0) {
-        Imprimir(directorio, &ext_blq_inodos, memdatos, argumento1);
-        continue;
-     }
-
-
-
-
-    // Si el comando es "salir", escribir los datos y cerrar
-    		if (strcmp(orden, "salir") == 0) {
-        		GrabarDatos(memdatos, fent);
-       			fclose(fent);
-        		return 0;
-    		}
+        if (strcmp(orden, "remove") == 0) {
+            Borrar(directorio, &ext_blq_inodos, &ext_bytemaps, &ext_superblock, argumento1, fent);
+            continue;
+        }
+        if (strcmp(orden, "imprimir") == 0) {
+            Imprimir(directorio, &ext_blq_inodos, memdatos, argumento1);
+            continue;
+        }
+        // Si el comando es "salir", escribir los datos y cerrar
+        if (strcmp(orden, "salir") == 0) {
+            if (grabardatos){
+                GrabarDatos(memdatos, fent);
+                // Escritura de metadatos en comandos rename, remove, copy     
+                Grabarinodosydirectorio(directorio, &ext_blq_inodos, fent);
+                GrabarByteMaps(&ext_bytemaps, fent);
+                GrabarSuperBloque(&ext_superblock, fent);
+            }
+            fclose(fent);
+            return 0;
+        }
 	}
 }
 
@@ -193,7 +181,7 @@ int ComprobarComando(char* strcomando, char* orden, char* argumento1, char* argu
             printf("ERROR: El comando '%s' no necesita argumentos.\n", orden);
         }
     } else {
-        printf("ERROR: Comando ilegal[bytemaps,copy,dir,info,imprimir,rename,remove,salir]\n");
+        printf("ERROR: Comando ilegal[bytemaps,copy,dir,info,imprimir,rename,remove,salir].\n");
     }
 
     return esComandoValido;
@@ -267,8 +255,7 @@ int Renombrar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, char *nombrea
     {
         if (strcmp(directorio[i].dir_nfich, nombreantiguo) == 0)
         {
-            strncpy(directorio[i].dir_nfich, nombrenuevo, LEN_NFICH - 1);
-            directorio[i].dir_nfich[LEN_NFICH - 1] = '\0';
+            memcpy(directorio[i].dir_nfich, nombrenuevo, LEN_NFICH);
             return 0;
         }
     }
@@ -299,29 +286,40 @@ int Imprimir(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, EXT_DATOS *mem
 
 int Borrar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, EXT_BYTE_MAPS *ext_bytemaps, EXT_SIMPLE_SUPERBLOCK *ext_superblock, char *nombre, FILE *fich)
 {
-    EXT_ENTRADA_DIR *entrada = BuscaFich(directorio, inodos, nombre);
-    if (entrada == NULL) // Verificamos si el archivo fue encontrado
+    int inodo_entrada = -1;
+    //Verificamos si el archivo fue encontrado
+    for (int i = 0; i < MAX_FICHEROS; i++) 
     {
-        printf("Error: Archivo no encontrado.\n");
-        return -1;
+        if (strcmp(directorio[i].dir_nfich, nombre) == 0) 
+        {
+            inodo_entrada = directorio[i].dir_inodo;
+            break;
+        }
     }
-
-    EXT_SIMPLE_INODE *inodo = &inodos->blq_inodos[entrada->dir_inodo];
-    for (int i = 0; i < MAX_NUMS_BLOQUE_INODO && inodo->i_nbloque[i] != NULL_BLOQUE; i++)
-    {
-        ext_bytemaps->bmap_bloques[inodo->i_nbloque[i]] = 0; // Liberar el bloque
-        inodo->i_nbloque[i] = NULL_BLOQUE;
+    if (inodo_entrada != -1){
+        EXT_SIMPLE_INODE *inodo = &inodos->blq_inodos[inodo_entrada];
+        for (int i = 0; i < MAX_NUMS_BLOQUE_INODO; i++)
+        {
+            if (inodo->i_nbloque[i] != NULL_BLOQUE){
+                ext_bytemaps->bmap_bloques[inodo->i_nbloque[i]] = 0; // Liberar el bloque
+                inodo->i_nbloque[i] = NULL_BLOQUE;
+                ext_superblock->s_free_blocks_count++;
+            } 
+        }
+        inodo->size_fichero = 0;
+        ext_bytemaps->bmap_inodos[inodo_entrada] = 0; // Liberar el inodo
+        // Limpiar la entrada de directorio
+        for (int i = 0; i < MAX_FICHEROS; i++) 
+        {
+            if (directorio[i].dir_inodo == inodo_entrada) 
+            {
+                memset(directorio[i].dir_nfich, 0, LEN_NFICH);
+                directorio[i].dir_inodo = NULL_INODO;
+                break;
+            }
+        }
+        ext_superblock->s_free_inodes_count++;
     }
-
-    inodo->size_fichero = 0;
-    ext_bytemaps->bmap_inodos[entrada->dir_inodo] = 0; // Liberar el inodo
-
-    // Limpiar la entrada de directorio
-    memset(entrada->dir_nfich, 0, LEN_NFICH);
-    entrada->dir_inodo = NULL_INODO;
-
-    ext_superblock->s_free_blocks_count++;
-    ext_superblock->s_free_inodes_count++;
     return 0;
 }
 
